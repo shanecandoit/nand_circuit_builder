@@ -31,7 +31,7 @@ def run_experiment():
     X_test, y_test = X[300:], y[300:]
     
     # Test different gate counts
-    gate_counts = [16, 32, 64]
+    gate_counts = [16, 32, 64, 128]
     results = {}
     
     for n_gates in gate_counts:
@@ -100,12 +100,14 @@ def create_comparison_plots(results, X_test, y_test):
     gate_counts = sorted(results.keys())
     n_gates_count = len(gate_counts)
     
-    # Create figure with 2 rows, 3 columns
-    fig = plt.figure(figsize=(16, 10))
+    # Create figure with 2 rows, dynamic columns based on number of gate counts
+    # Use at least 2 columns, but expand if needed
+    n_cols = max(2, n_gates_count)
+    fig = plt.figure(figsize=(5 * n_cols, 10))
     
     # Row 1: Training curves for each gate count
     for idx, n_gates in enumerate(gate_counts):
-        ax = plt.subplot(2, 3, idx + 1)
+        ax = plt.subplot(2, n_cols, idx + 1)
         history = results[n_gates]['history']
         
         epochs = history['epoch']
@@ -130,7 +132,7 @@ def create_comparison_plots(results, X_test, y_test):
     
     # Row 2: Prediction scatter plots
     for idx, n_gates in enumerate(gate_counts):
-        ax = plt.subplot(2, 3, idx + 4)
+        ax = plt.subplot(2, n_cols, n_cols + idx + 1)
         y_pred = results[n_gates]['predictions']
         
         # Scatter plot
@@ -167,13 +169,14 @@ def create_comparison_plots(results, X_test, y_test):
     fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
     # Left: All training curves
-    colors = ['blue', 'orange', 'green']
+    colors = ['blue', 'orange', 'green', 'red', 'purple', 'brown', 'pink', 'gray']
     for idx, n_gates in enumerate(gate_counts):
         history = results[n_gates]['history']
         epochs = history['epoch']
+        color = colors[idx % len(colors)]  # Cycle through colors if needed
         ax1.semilogy(epochs, history['test_loss'], 
                     label=f'{n_gates} gates', 
-                    color=colors[idx], linewidth=2)
+                    color=color, linewidth=2)
     
     ax1.set_xlabel('Epoch')
     ax1.set_ylabel('Test Loss (log scale)')
