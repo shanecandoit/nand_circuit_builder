@@ -41,6 +41,8 @@ class CircuitBuilder(nn.Module):
         Random seed for reproducibility
     device : str, default='cpu'
         Device to run computations on
+    log_gate_selection : bool, default=False
+        Whether to log gate input selections during training
     """
     
     def __init__(
@@ -54,7 +56,8 @@ class CircuitBuilder(nn.Module):
         learning_rate: float = 0.01,
         l1_reg: float = 0.001,
         random_state: Optional[int] = None,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        log_gate_selection: bool = False
     ):
         super().__init__()
         self.n_gates = n_gates
@@ -67,6 +70,7 @@ class CircuitBuilder(nn.Module):
         self.l1_reg = l1_reg
         self.random_state = random_state
         self.device = device
+        self.log_gate_selection = log_gate_selection
         
         # Will be set during fit
         self.n_features_ = None
@@ -78,14 +82,6 @@ class CircuitBuilder(nn.Module):
             torch.manual_seed(random_state)
     
     def _nand_continuous(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        """
-        Continuous relaxation of NAND gate: nand(a, b) = 1 - (a * b)
-        
-        This allows gradient flow during training.
-        """
-        return 1.0 - (a * b)
-    
-    def _get_temperature(self, epoch: int, max_epochs: int) -> float:
         """
         Continuous relaxation of NAND gate: nand(a, b) = 1 - (a * b)
         
@@ -107,11 +103,54 @@ class CircuitBuilder(nn.Module):
         else:
             raise ValueError(f"Unknown temperature schedule: {self.temperature_schedule}")
     
+    def _log_gate_selections(self, selections: List[Dict], epoch: int) -> None:
+        """Log gate input selections to help diagnose routing issues."""
+        print(f"\n  Gate Selection Analysis (Epoch {epoch}):")
+        print(f"  {'Gate':<6}{'Input A':<10}{'Input B':<10}{'Prob A':<10}{'Prob B':<10}{'Same?':<8}")
+        print(f"  {'-'*58}")
+        
+        n_features = self.n_features_
+        same_count = 0
+        const_count = 0
+        
+        for sel in selections[:min(10, len(selections))]:  # Show first 10 gates
+            gate_idx = sel['gate']
+            input_a = sel['input_a']
+            input_b = sel['input_b']
+            
+            # Decode input names
+            def decode_input(idx):
+                if idx < n_features:
+                    return f"x{idx}"
+                elif idx == n_features:
+                    return "const_0"
+                elif idx == n_features + 1:
+                    return "const_1"
+                else:
+                    return f"gate_{idx - n_features - 2}"
+            
+            name_a = decode_input(input_a)
+            name_b = decode_input(input_b)
+            same_marker = "YES" if sel['same_input'] else ""
+            
+            print(f"  {gate_idx:<6}{name_a:<10}{name_b:<10}{sel['prob_a']:<10.3f}{sel['prob_b']:<10.3f}{same_marker:<8}")
+            
+            if sel['same_input']:
+                same_count += 1
+            if input_a >= n_features and input_a <= n_features + 1:
+                const_count += 1
+            if input_b >= n_features and input_b <= n_features + 1:
+                const_count += 1
+        
+        print(f"\n  Summary: {same_count}/{len(selections)} gates use same input (needed for squaring)")
+        print(f"           {const_count} constant connections (can create linear NOT gates)\n")
+    
     def forward(
         self, 
         X: torch.Tensor, 
         temperature: float = 1.0,
-        use_hard_selection: bool = False
+        use_hard_selection: bool = False,
+        log_selections: bool = False
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
         Forward pass through the circuit.
@@ -138,15 +177,18 @@ class CircuitBuilder(nn.Module):
         n_samples = X.shape[0]
         
         # Available values: input features + constant 0 + constant 1 + previous gates
-        # Start with inputs and constants
+        # Start with inputs and constants. Bound continuous inputs to (0,1)
+        # using a sigmoid to avoid exploding values during continuous NAND.
+        X_bounded = torch.sigmoid(X)
         available = torch.cat([
-            X,
+            X_bounded,
             torch.zeros((n_samples, 1), device=self.device),  # Constant 0
             torch.ones((n_samples, 1), device=self.device)     # Constant 1
         ], dim=1)
         
         gate_outputs = []
         connection_probs = []
+        gate_selections = []  # Track which inputs each gate selects
         
         # Process each gate (DenseNet: each gate can use any previous)
         for gate_idx in range(self.n_gates):
@@ -162,6 +204,18 @@ class CircuitBuilder(nn.Module):
             
             # Select top 2 inputs for NAND gate
             top2_indices = torch.topk(probs, k=2).indices
+            
+            # Log selections if requested
+            if log_selections:
+                gate_selections.append({
+                    'gate': gate_idx,
+                    'input_a': top2_indices[0].item(),
+                    'input_b': top2_indices[1].item(),
+                    'prob_a': probs[top2_indices[0]].item(),
+                    'prob_b': probs[top2_indices[1]].item(),
+                    'same_input': top2_indices[0].item() == top2_indices[1].item(),
+                    'n_available': n_available
+                })
             
             # Use the selected inputs
             input_a = available[:, top2_indices[0]]
@@ -180,6 +234,10 @@ class CircuitBuilder(nn.Module):
         
         if self.output_scaling:
             outputs = outputs * self.output_scale
+        
+        # Return gate selections if logging was requested
+        if log_selections:
+            return outputs, gate_outputs, connection_probs, gate_selections
         
         return outputs, gate_outputs, connection_probs
     
@@ -316,9 +374,10 @@ class CircuitBuilder(nn.Module):
             
             # Forward pass
             optimizer.zero_grad()
-            outputs, gate_outputs, connection_probs = self.forward(
+            result = self.forward(
                 X_torch, temperature, use_hard_selection=False
             )
+            outputs, gate_outputs, connection_probs = result[:3]
             
             # Compute loss (MSE)
             loss = torch.mean((outputs - y_torch) ** 2)
@@ -339,13 +398,34 @@ class CircuitBuilder(nn.Module):
             
             optimizer.step()
             
-            # Check for NaN
+            # Check for NaN/Inf in loss. If detected, record a final history entry
+            # so plotting and summary routines don't crash due to empty lists,
+            # then stop training.
             if torch.isnan(loss) or torch.isinf(loss):
                 if verbose:
                     print(f"\nNaN/Inf detected at epoch {epoch}! Stopping training.")
-                    print(f"Loss: {loss.item()}, Total Loss: {total_loss.item()}")
+                    try:
+                        print(f"Loss: {loss.item()}, Total Loss: {total_loss.item()}")
+                    except Exception:
+                        print("Loss contains non-finite values")
                     if self.output_scaling:
-                        print(f"Output scale: {self.output_scale.item()}")
+                        try:
+                            print(f"Output scale: {self.output_scale.item()}")
+                        except Exception:
+                            print("Output scale contains non-finite values")
+
+                # Ensure we have at least one history entry to avoid IndexError
+                history['epoch'].append(epoch)
+                history['train_loss'].append(float('nan'))
+                history['temperature'].append(temperature)
+                history['train_acc'].append(None)
+
+                # Mark val/test entries as None so plotting code can check safely
+                history['val_loss'].append(None)
+                history['val_acc'].append(None)
+                history['test_loss'].append(None)
+                history['test_acc'].append(None)
+
                 break
             
             # Track metrics
@@ -369,7 +449,8 @@ class CircuitBuilder(nn.Module):
             # Validation loss
             if X_val is not None:
                 with torch.no_grad():
-                    val_outputs, _, _ = self.forward(X_val_torch, temperature, use_hard_selection=False)
+                    val_result = self.forward(X_val_torch, temperature, use_hard_selection=False)
+                    val_outputs = val_result[0]
                     val_loss = torch.mean((val_outputs - y_val_torch) ** 2)
                     history['val_loss'].append(val_loss.item())
                     if is_classification:
@@ -390,7 +471,8 @@ class CircuitBuilder(nn.Module):
             # Test loss
             if X_test is not None:
                 with torch.no_grad():
-                    test_outputs, _, _ = self.forward(X_test_torch, temperature, use_hard_selection=False)
+                    test_result = self.forward(X_test_torch, temperature, use_hard_selection=False)
+                    test_outputs = test_result[0]
                     test_loss = torch.mean((test_outputs - y_test_torch) ** 2)
                     history['test_loss'].append(test_loss.item())
                     if is_classification:
@@ -417,6 +499,12 @@ class CircuitBuilder(nn.Module):
                     log_str += f" | Test Loss: {test_loss.item():.6f}"
                 log_str += f" | Temp: {temperature:.3f}"
                 print(log_str)
+                
+                # Optional gate selection logging
+                if self.log_gate_selection and epoch % 200 == 0:
+                    with torch.no_grad():
+                        _, _, _, selections = self.forward(X_torch[:1], temperature, log_selections=True)
+                    self._log_gate_selections(selections, epoch)
             
             # Early stopping
             current_loss = total_loss.item()
@@ -603,7 +691,8 @@ class CircuitBuilder(nn.Module):
         
         # Forward pass with hard selection (production mode)
         with torch.no_grad():
-            outputs, _, _ = self.forward(X_torch, temperature=0.01, use_hard_selection=True)
+            result = self.forward(X_torch, temperature=0.01, use_hard_selection=True)
+            outputs = result[0]
         
         outputs_np = outputs.cpu().numpy()
         

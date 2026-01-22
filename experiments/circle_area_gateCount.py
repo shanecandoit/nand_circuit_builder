@@ -44,7 +44,9 @@ def run_experiment():
             input_buckets=7, 
             random_state=42,
             learning_rate=0.01, 
-            output_scaling=True
+            output_scaling=True,
+            temperature_init=5.0,
+            temperature_final=0.5
         )
         
         history = model.fit(

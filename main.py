@@ -12,6 +12,7 @@ Examples:
     python experiments/baseline_tests.py      # All baseline tests
     python experiments/circle_area_gateCount.py  # Gate count comparison
     python experiments/real_diabetes.py       # Diabetes regression experiment
+    python experiments/real_housing.py        # Housing prices regression experiment
 """
 
 import sys
@@ -27,6 +28,7 @@ def main():
             print("  - baseline_tests: Run all standard tests")
             print("  - circle_area_gateCount: Compare gate counts for circle area")
             print("  - real_diabetes: Diabetes regression experiment (R² > 0.4)")
+            print("  - real_housing: Housing prices regression experiment (R² > 0.6)")
             print("\nNote: Running 'python main.py' without arguments will run ALL experiments.")
             return
         elif sys.argv[1] == '--experiment':
@@ -41,7 +43,8 @@ def main():
     experiments = [
         'baseline_tests',
         'circle_area_gateCount',
-        'real_diabetes'
+        'real_diabetes',
+        'real_housing'
     ]
     
     print("="*70)
