@@ -535,6 +535,11 @@ class CircuitBuilder(nn.Module):
         
         # Loss plot
         epochs = history['epoch']
+        
+        # Extract temperature info (needed for summary file later)
+        init_temp = history['temperature'][0]
+        final_temp = history['temperature'][-1]
+        
         ax1.plot(epochs, history['train_loss'], label='Train Loss', linewidth=2, marker='o', markersize=2)
         if history['val_loss'][0] is not None:
             ax1.plot(epochs, history['val_loss'], label='Val Loss', linewidth=2, marker='s', markersize=2)
@@ -587,8 +592,6 @@ class CircuitBuilder(nn.Module):
             ax2.grid(True, alpha=0.3)
             
             # Add temperature info
-            final_temp = history['temperature'][-1]
-            init_temp = history['temperature'][0]
             temp_text = f'Initial: {init_temp:.3f}\nFinal: {final_temp:.3f}'
             ax2.text(0.98, 0.98, temp_text, transform=ax2.transAxes, 
                     fontsize=9, verticalalignment='top', horizontalalignment='right',
