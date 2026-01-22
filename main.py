@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from circuit_builder import CircuitBuilder
 
 
@@ -9,14 +10,17 @@ def test_average():
     print("="*60)
     
     np.random.seed(42)
-    X_train = np.random.rand(200, 2)
-    y_train = (X_train[:, 0] + X_train[:, 1]) / 2
+    X = np.random.rand(400, 2)
+    y = (X[:, 0] + X[:, 1]) / 2
     
-    X_test = np.random.rand(50, 2)
-    y_test = (X_test[:, 0] + X_test[:, 1]) / 2
+    # Split into train/val/test
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:300], y[200:300]
+    X_test, y_test = X[300:], y[300:]
     
     model = CircuitBuilder(n_gates=15, input_buckets=5, random_state=42, learning_rate=0.05)
-    model.fit(X_train, y_train, epochs=500, verbose=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test, 
+                       epochs=500, verbose=True, plot=True, test_name='Average Function')
     
     y_pred = model.predict(X_test)
     mse = np.mean((y_pred - y_test) ** 2)
@@ -31,21 +35,95 @@ def test_average():
     return mse < 0.01
 
 
-def test_sigmoid():
-    """Test learning sigmoid approximation."""
+def test_rectangle_area():
+    """Test learning rectangle area = width * height."""
     print("\n" + "="*60)
-    print("TEST 2: Sigmoid Approximation - f(x) ≈ 1 / (1 + exp(-x))")
+    print("TEST 2: Rectangle Area - f(w, h) = w * h")
     print("="*60)
     
     np.random.seed(42)
-    X_train = np.random.randn(200, 1) * 2
-    y_train = 1 / (1 + np.exp(-X_train[:, 0]))
+    X = np.random.rand(400, 2)
+    y = X[:, 0] * X[:, 1]
     
-    X_test = np.random.randn(50, 1) * 2
-    y_test = 1 / (1 + np.exp(-X_test[:, 0]))
+    # Split into train/val/test
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:300], y[200:300]
+    X_test, y_test = X[300:], y[300:]
+    
+    model = CircuitBuilder(n_gates=20, input_buckets=5, random_state=42, learning_rate=0.05)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=500, verbose=True, plot=True, test_name='Rectangle Area')
+    
+    y_pred = model.predict(X_test)
+    mse = np.mean((y_pred - y_test) ** 2)
+    mae = np.mean(np.abs(y_pred - y_test))
+    r2 = 1 - (np.sum((y_test - y_pred) ** 2) / np.sum((y_test - np.mean(y_test)) ** 2))
+    
+    print(f"\nTest MSE: {mse:.6f}")
+    print(f"Test MAE: {mae:.6f}")
+    print(f"Test R²: {r2:.4f}")
+    print(f"Sample predictions vs actual:")
+    for i in range(5):
+        print(f"  ({X_test[i, 0]:.3f} x {X_test[i, 1]:.3f}) -> Pred: {y_pred[i]:.3f}, Actual: {y_test[i]:.3f}")
+    
+    return mse < 0.01
+
+
+def test_circle_area():
+    """Test learning circle area = π * r²."""
+    print("\n" + "="*60)
+    print("TEST 3: Circle Area - f(r) = pi * r^2")
+    print("="*60)
+    
+    np.random.seed(42)
+    X = np.random.rand(400, 1) * 2
+    y = np.pi * (X[:, 0] ** 2)
+    
+    # Split into train/val/test
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:300], y[200:300]
+    X_test, y_test = X[300:], y[300:]
+    
+    model = CircuitBuilder(n_gates=25, input_buckets=7, random_state=42, 
+                          learning_rate=0.01, output_scaling=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=1_000, verbose=True, plot=True, test_name='Circle Area')
+    
+    y_pred = model.predict(X_test)
+    mse = np.mean((y_pred - y_test) ** 2)
+    mae = np.mean(np.abs(y_pred - y_test))
+    r2 = 1 - (np.sum((y_test - y_pred) ** 2) / np.sum((y_test - np.mean(y_test)) ** 2))
+    pct_error = np.mean(np.abs((y_pred - y_test) / y_test)) * 100
+    
+    print(f"\nTest MSE: {mse:.6f}")
+    print(f"Test MAE: {mae:.6f}")
+    print(f"Test R²: {r2:.4f}")
+    print(f"Test % Error: {pct_error:.2f}%")
+    print(f"Sample predictions vs actual:")
+    for i in range(5):
+        error_pct = abs((y_pred[i] - y_test[i]) / y_test[i]) * 100
+        print(f"  r={X_test[i, 0]:.3f} -> Pred: {y_pred[i]:.3f}, Actual: {y_test[i]:.3f} ({error_pct:.1f}% error)")
+    
+    return pct_error < 10
+
+
+def test_sigmoid():
+    """Test learning sigmoid approximation."""
+    print("\n" + "="*60)
+    print("TEST 4: Sigmoid Approximation - f(x) ~= 1 / (1 + exp(-x))")
+    print("="*60)
+    
+    np.random.seed(42)
+    X = np.random.randn(300, 1) * 2
+    y = 1 / (1 + np.exp(-X[:, 0]))
+    
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:250], y[200:250]
+    X_test, y_test = X[250:], y[250:]
     
     model = CircuitBuilder(n_gates=20, input_buckets=7, random_state=42, learning_rate=0.05)
-    model.fit(X_train, y_train, epochs=500, verbose=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=500, verbose=True, plot=True, test_name='Sigmoid Approximation')
     
     y_pred = model.predict(X_test)
     mse = np.mean((y_pred - y_test) ** 2)
@@ -63,18 +141,20 @@ def test_sigmoid():
 def test_step_function():
     """Test learning a step function."""
     print("\n" + "="*60)
-    print("TEST 3: Step Function - f(x) = 1 if x > 0.5 else 0")
+    print("TEST 5: Step Function - f(x) = 1 if x > 0.5 else 0")
     print("="*60)
     
     np.random.seed(42)
-    X_train = np.random.rand(200, 1)
-    y_train = (X_train[:, 0] > 0.5).astype(float)
+    X = np.random.rand(300, 1)
+    y = (X[:, 0] > 0.5).astype(float)
     
-    X_test = np.random.rand(50, 1)
-    y_test = (X_test[:, 0] > 0.5).astype(float)
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:250], y[200:250]
+    X_test, y_test = X[250:], y[250:]
     
     model = CircuitBuilder(n_gates=10, input_buckets=5, random_state=42, learning_rate=0.05)
-    model.fit(X_train, y_train, epochs=500, verbose=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=500, verbose=True, plot=True, test_name='Step Function')
     
     y_pred = model.predict(X_test)
     y_pred_binary = (y_pred > 0.5).astype(float)
@@ -91,18 +171,20 @@ def test_step_function():
 def test_multiply():
     """Test learning multiplication."""
     print("\n" + "="*60)
-    print("TEST 4: Multiplication - f(x, y) = x * y")
+    print("TEST 6: Multiplication - f(x, y) = x * y")
     print("="*60)
     
     np.random.seed(42)
-    X_train = np.random.rand(200, 2)
-    y_train = X_train[:, 0] * X_train[:, 1]
+    X = np.random.rand(300, 2)
+    y = X[:, 0] * X[:, 1]
     
-    X_test = np.random.rand(50, 2)
-    y_test = X_test[:, 0] * X_test[:, 1]
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:250], y[200:250]
+    X_test, y_test = X[250:], y[250:]
     
     model = CircuitBuilder(n_gates=20, input_buckets=5, random_state=42, learning_rate=0.05)
-    model.fit(X_train, y_train, epochs=500, verbose=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=500, verbose=True, plot=True, test_name='Multiplication')
     
     y_pred = model.predict(X_test)
     mse = np.mean((y_pred - y_test) ** 2)
@@ -115,6 +197,52 @@ def test_multiply():
         print(f"  Input: ({X_test[i, 0]:.3f}, {X_test[i, 1]:.3f}) -> Pred: {y_pred[i]:.3f}, Actual: {y_test[i]:.3f}")
     
     return mse < 0.01
+    
+    print(f"\nTest MSE: {mse:.6f}")
+    print(f"Test MAE: {mae:.6f}")
+    print(f"Test R²: {r2:.4f}")
+    print(f"Sample predictions vs actual:")
+    for i in range(5):
+        print(f"  Input: ({X_test[i, 0]:.3f}, {X_test[i, 1]:.3f}) -> Pred: {y_pred[i]:.3f}, Actual: {y_test[i]:.3f}")
+    
+    return mse < 0.01
+
+
+def test_circle_area():
+    """Test learning circle area = π * r²."""
+    print("\n" + "="*60)
+    print("TEST 6: Circle Area - f(r) = pi * r^2")
+    print("="*60)
+    
+    np.random.seed(42)
+    X = np.random.rand(400, 1) * 2  # radius in [0, 2]
+    y = np.pi * (X[:, 0] ** 2)  # area
+    
+    # Split into train/val/test
+    X_train, y_train = X[:200], y[:200]
+    X_val, y_val = X[200:300], y[200:300]
+    X_test, y_test = X[300:], y[300:]
+    
+    model = CircuitBuilder(n_gates=25, input_buckets=7, random_state=42, 
+                          learning_rate=0.05, output_scaling=True)
+    history = model.fit(X_train, y_train, X_val, y_val, X_test, y_test,
+                       epochs=500, verbose=True, plot=True, test_name='Circle Area')
+    
+    y_pred = model.predict(X_test)
+    mse = np.mean((y_pred - y_test) ** 2)
+    mae = np.mean(np.abs(y_pred - y_test))
+    r2 = 1 - (np.sum((y_test - y_pred) ** 2) / np.sum((y_test - np.mean(y_test)) ** 2))
+    pct_error = np.mean(np.abs((y_pred - y_test) / y_test)) * 100
+    
+    print(f"\nTest MSE: {mse:.6f}")
+    print(f"Test MAE: {mae:.6f}")
+    print(f"Test R²: {r2:.4f}")
+    print(f"Test % Error: {pct_error:.2f}%")
+    print(f"Sample predictions vs actual:")
+    for i in range(5):
+        print(f"  Input: r={X_test[i, 0]:.3f} -> Pred: {y_pred[i]:.3f}, Actual: {y_test[i]:.3f}")
+    
+    return pct_error < 10  # Less than 10% error
 
 
 if __name__ == "__main__":
@@ -125,6 +253,8 @@ if __name__ == "__main__":
     
     # Run tests
     results['average'] = test_average()
+    results['rectangle_area'] = test_rectangle_area()
+    results['circle_area'] = test_circle_area()
     results['sigmoid'] = test_sigmoid()
     results['step'] = test_step_function()
     results['multiply'] = test_multiply()
@@ -134,8 +264,8 @@ if __name__ == "__main__":
     print("TEST SUMMARY")
     print("="*60)
     for test_name, passed in results.items():
-        status = "✓ PASS" if passed else "✗ FAIL"
-        print(f"{test_name:15s}: {status}")
+        status = "[PASS]" if passed else "[FAIL]"
+        print(f"{test_name:20s}: {status}")
     
     total = len(results)
     passed = sum(results.values())
