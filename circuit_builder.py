@@ -485,6 +485,20 @@ class CircuitBuilder(nn.Module):
                     min_test_loss = min(test_losses)
                     min_test_epoch = history['epoch'][history['test_loss'].index(min_test_loss)]
                     f.write(f"  Best Test Loss: {min_test_loss:.6f} (epoch {min_test_epoch})\n")
+            
+            # Training history table
+            f.write(f"\nTraining History (every 100 epochs):\n")
+            f.write(f"Epoch,Train_Loss,Val_Loss,Test_Loss\n")
+            for i, epoch in enumerate(epochs):
+                if epoch % 100 == 0 or epoch == epochs[-1]:
+                    train_loss = history['train_loss'][i]
+                    val_loss = history['val_loss'][i] if history['val_loss'][i] is not None else 'N/A'
+                    test_loss = history['test_loss'][i] if history['test_loss'][i] is not None else 'N/A'
+                    
+                    val_str = f"{val_loss:.6f}" if val_loss != 'N/A' else val_loss
+                    test_str = f"{test_loss:.6f}" if test_loss != 'N/A' else test_loss
+                    
+                    f.write(f"{epoch},{train_loss:.6f},{val_str},{test_str}\n")
         
         print(f"Summary saved to: {summary_file}")
     
