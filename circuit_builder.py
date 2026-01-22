@@ -290,8 +290,26 @@ class CircuitBuilder(nn.Module):
             'train_loss': [],
             'val_loss': [],
             'test_loss': [],
-            'temperature': []
+            'temperature': [],
+            'train_acc': [],
+            'val_acc': [],
+            'test_acc': []
         }
+
+        # Detect if task is classification (integer labels or one-hot)
+        is_classification = False
+        try:
+            # If original y array consisted of integers (or whole numbers) and few unique values
+            if np.issubdtype(y.dtype, np.integer):
+                is_classification = True
+            else:
+                # check if values are integer-valued and have few unique labels
+                if np.all(np.floor(y) == y):
+                    unique_vals = np.unique(y)
+                    if unique_vals.size <= 10 and unique_vals.min() >= 0:
+                        is_classification = True
+        except Exception:
+            is_classification = False
         
         for epoch in range(epochs):
             temperature = self._get_temperature(epoch, epochs)
@@ -334,6 +352,19 @@ class CircuitBuilder(nn.Module):
             history['epoch'].append(epoch)
             history['train_loss'].append(loss.item())
             history['temperature'].append(temperature)
+            # Accuracy (if classification)
+            if is_classification:
+                with torch.no_grad():
+                    if self.n_outputs_ == 1:
+                        preds = (outputs > 0.5).float()
+                        train_acc = (preds == y_torch).float().mean().item()
+                    else:
+                        preds = outputs.argmax(dim=1)
+                        true = y_torch.argmax(dim=1)
+                        train_acc = (preds == true).float().mean().item()
+                history['train_acc'].append(train_acc)
+            else:
+                history['train_acc'].append(None)
             
             # Validation loss
             if X_val is not None:
@@ -341,8 +372,20 @@ class CircuitBuilder(nn.Module):
                     val_outputs, _, _ = self.forward(X_val_torch, temperature, use_hard_selection=False)
                     val_loss = torch.mean((val_outputs - y_val_torch) ** 2)
                     history['val_loss'].append(val_loss.item())
+                    if is_classification:
+                        if self.n_outputs_ == 1:
+                            val_preds = (val_outputs > 0.5).float()
+                            val_acc = (val_preds == y_val_torch).float().mean().item()
+                        else:
+                            val_preds = val_outputs.argmax(dim=1)
+                            val_true = y_val_torch.argmax(dim=1)
+                            val_acc = (val_preds == val_true).float().mean().item()
+                        history['val_acc'].append(val_acc)
+                    else:
+                        history['val_acc'].append(None)
             else:
                 history['val_loss'].append(None)
+                history['val_acc'].append(None)
             
             # Test loss
             if X_test is not None:
@@ -350,8 +393,20 @@ class CircuitBuilder(nn.Module):
                     test_outputs, _, _ = self.forward(X_test_torch, temperature, use_hard_selection=False)
                     test_loss = torch.mean((test_outputs - y_test_torch) ** 2)
                     history['test_loss'].append(test_loss.item())
+                    if is_classification:
+                        if self.n_outputs_ == 1:
+                            test_preds = (test_outputs > 0.5).float()
+                            test_acc = (test_preds == y_test_torch).float().mean().item()
+                        else:
+                            test_preds = test_outputs.argmax(dim=1)
+                            test_true = y_test_torch.argmax(dim=1)
+                            test_acc = (test_preds == test_true).float().mean().item()
+                        history['test_acc'].append(test_acc)
+                    else:
+                        history['test_acc'].append(None)
             else:
                 history['test_loss'].append(None)
+                history['test_acc'].append(None)
             
             # Logging
             if verbose and epoch % 100 == 0:
@@ -417,20 +472,39 @@ class CircuitBuilder(nn.Module):
                 fontsize=9, verticalalignment='top',
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
-        # Temperature plot
-        ax2.plot(epochs, history['temperature'], color='red', linewidth=2, marker='o', markersize=2)
-        ax2.set_xlabel('Epoch', fontsize=12)
-        ax2.set_ylabel('Temperature', fontsize=12)
-        ax2.set_title('Connection Selection Temperature', fontsize=14, fontweight='bold')
-        ax2.grid(True, alpha=0.3)
-        
-        # Add temperature info
-        final_temp = history['temperature'][-1]
-        init_temp = history['temperature'][0]
-        temp_text = f'Initial: {init_temp:.3f}\nFinal: {final_temp:.3f}'
-        ax2.text(0.98, 0.98, temp_text, transform=ax2.transAxes, 
-                fontsize=9, verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+        # Right pane: plot accuracy if available, otherwise plot temperature
+        has_acc = any(a is not None for a in history.get('train_acc', []))
+        if has_acc:
+            ax2.plot(epochs, history['train_acc'], color='green', linewidth=2, marker='o', markersize=2)
+            if history['val_acc'][0] is not None:
+                ax2.plot(epochs, history['val_acc'], color='orange', linewidth=2, marker='s', markersize=2)
+            if history['test_acc'][0] is not None:
+                ax2.plot(epochs, history['test_acc'], color='purple', linewidth=2, marker='^', markersize=2)
+            ax2.set_xlabel('Epoch', fontsize=12)
+            ax2.set_ylabel('Accuracy', fontsize=12)
+            ax2.set_title('Training Accuracy', fontsize=14, fontweight='bold')
+            ax2.grid(True, alpha=0.3)
+
+            final_acc = history['train_acc'][-1]
+            acc_text = f'Final Train Acc: {final_acc:.3f}'
+            ax2.text(0.98, 0.98, acc_text, transform=ax2.transAxes, 
+                    fontsize=9, verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
+        else:
+            # Temperature plot (fallback)
+            ax2.plot(epochs, history['temperature'], color='red', linewidth=2, marker='o', markersize=2)
+            ax2.set_xlabel('Epoch', fontsize=12)
+            ax2.set_ylabel('Temperature', fontsize=12)
+            ax2.set_title('Connection Selection Temperature', fontsize=14, fontweight='bold')
+            ax2.grid(True, alpha=0.3)
+            
+            # Add temperature info
+            final_temp = history['temperature'][-1]
+            init_temp = history['temperature'][0]
+            temp_text = f'Initial: {init_temp:.3f}\nFinal: {final_temp:.3f}'
+            ax2.text(0.98, 0.98, temp_text, transform=ax2.transAxes, 
+                    fontsize=9, verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
         
         # Overall title
         fig.suptitle(f'NAND Circuit Training: {test_name}\n{self.n_gates} gates, {len(epochs)} epochs', 
@@ -466,6 +540,13 @@ class CircuitBuilder(nn.Module):
                 f.write(f"  Final Val Loss: {final_val:.6f}\n")
             if history['test_loss'][0] is not None:
                 f.write(f"  Final Test Loss: {final_test:.6f}\n")
+            # Final accuracies (if available)
+            if history['train_acc'][0] is not None:
+                f.write(f"  Final Train Acc: {history['train_acc'][-1]:.4f}\n")
+            if history['val_acc'][0] is not None:
+                f.write(f"  Final Val Acc: {history['val_acc'][-1]:.4f}\n")
+            if history['test_acc'][0] is not None:
+                f.write(f"  Final Test Acc: {history['test_acc'][-1]:.4f}\n")
             
             # Min losses
             min_train_loss = min(history['train_loss'])
