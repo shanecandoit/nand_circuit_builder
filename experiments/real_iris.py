@@ -73,7 +73,7 @@ def test_iris():
     # Model configuration: 4 features × 5 buckets = 20 binary inputs
     # 3 classes → 3 output heads (auto-detected from y shape)
     model = CircuitBuilder(
-        n_gates=40,  # More gates for classification
+        n_gates=128,  # More gates for classification
         input_buckets=5,  # 5 buckets per feature = 20 total binary inputs
         random_state=42,
         learning_rate=0.01,
